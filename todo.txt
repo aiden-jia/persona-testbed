@@ -1,0 +1,8 @@
+modify judging rubric (emphasize more human qualities, less wordy)
+- emphasize specific reasons why it is bad
+
+Write summary of tested methods
+
+have judge also output reasoning/feedback
+judge rank + reason
+iterate on these

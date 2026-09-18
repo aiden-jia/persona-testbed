@@ -1,0 +1,129 @@
+# Cold Call Simulation — Human-Likeness Evaluation
+#
+# Re-evaluates the cold_call_outreach scenario against four criteria
+# specifically targeting whether the AI persona reads as a real person
+# receiving an unsolicited call — not just a well-behaved AI playing one.
+#
+# Follows the rubric structure of old_rubric.yaml (simple narrative scores,
+# no structured JSON output required from the grader).
+#
+# Usage (from promptfoo_sim/):
+#   promptfoo eval --config promptfooconfig.coldcall.yaml
+#   promptfoo view
+
+description: "Persona Prompting Method Comparison — Cold Call Human-Likeness"
+
+evaluateOptions:
+  maxConcurrency: 2
+
+# gpt-4o for grading — stronger reasoning than gpt-4o-mini, better at nuanced evaluation
+defaultTest:
+  options:
+    provider: openai:chat:gpt-5.4
+
+providers:
+  - id: "python:provider.py"
+    label: "basic"
+    config:
+      method: "basic"
+
+  - id: "python:provider.py"
+    label: "few_shot"
+    config:
+      method: "few_shot"
+
+  - id: "python:provider.py"
+    label: "chain_of_thought"
+    config:
+      method: "chain_of_thought"
+
+  - id: "python:provider.py"
+    label: "tree_of_thought_coldcall"
+    config:
+      method: "tree_of_thought_coldcall"
+
+prompts:
+  - "persona={{persona_name}} | scenario={{scenario_id}}"
+
+tests:
+  - description: "Cold Call Recipient — B2B Outreach Simulation"
+    vars:
+      persona_name: "Cold Call Recipient"
+      scenario_id: "cold_call_outreach"
+    assert:
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the NATURAL SPEECH of this cold call simulation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona use conversational phrasing — contractions, informal register, the kind of language a person actually uses on a phone call?
+          - Does the persona avoid oversharing or overexplaining? A real person doesn't volunteer a full paragraph when a sentence will do; they don't list every concern upfront unprompted.
+          - Does the persona stay controlled — holding back and letting the caller provide more details before running ahead? Real listeners don't front-load everything they know; they wait, then respond to what was actually said.
+
+          1–2: Clearly AI — dumps information freely, over-explains every reaction, or speaks in uniformly polished register
+          3–4: Frequently overshares or over-explains; occasionally restrained but not consistently
+          5–6: Somewhat controlled but lapses into AI-typical verbosity or over-disclosure
+          7–8: Mostly restrained and conversational; holds back appropriately; minor lapses only
+          9–10: Fully controlled — speaks only as much as the moment calls for, uses natural phrasing throughout
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the CONTEXTUAL RESPONSIVENESS of this cold call simulation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona react to the specific things the caller said — particular words, claims, or questions — rather than giving interchangeable replies?
+          - Does it make use of information the caller has already shared? (e.g., if the caller named a specific problem or company, does the persona respond to that rather than treating it as a generic pitch?)
+          - Does it build on the conversation over time — referring back to an earlier point, or reacting when the caller repeats themselves or shifts tactics?
+          - Does it avoid giving the same type of response regardless of what the caller said?
+
+          1–2: No responsiveness — every reply could have been written before the call started
+          3–4: Occasionally reacts to something specific but mostly canned
+          5–6: Shows some responsiveness but misses clear opportunities to engage with the caller's actual words
+          7–8: Clearly tracking and reacting to what the caller says; minor gaps only
+          9–10: Highly responsive throughout — every reply feels shaped by exactly what the caller just said
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the HEDGING AND TENTATIVENESS of this cold call simulation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          This criterion measures whether the persona expresses appropriate uncertainty and qualifies claims the way real people do — rather than speaking with the unnatural certainty and precision characteristic of AI output.
+
+          Criteria:
+          - Does the persona use hedges naturally? ("I think we might already have something for that", "I'm not totally sure", "that could be interesting, maybe")
+          - Does it avoid stating opinions and reactions with unqualified confidence when real people would be more tentative? ("sounds like it might be worth a look" vs. "this solution is clearly relevant to our needs")
+          - Does uncertainty come through in the phrasing, not just the content — i.e., does it feel like someone thinking out loud rather than issuing verdicts?
+          - Does the level of tentativeness fit the moment? (More hedging early; firmer if the caller earns it; not uniformly uncertain or uniformly sure)
+
+          1–2: Speaks with AI-like certainty throughout — no hedges, qualifications, or tentative phrasing
+          3–4: Rare hedging that feels inserted rather than natural; mostly overconfident register
+          5–6: Some tentativeness present but inconsistent or misplaced
+          7–8: Hedges appropriately in most moments; feels like someone genuinely unsure or thinking it through
+          9–10: Tentativeness is woven naturally throughout — exactly how a real person reasons aloud under mild uncertainty
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the BACKCHANNEL AND ACKNOWLEDGMENT BEHAVIOR of this cold call simulation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Backchannels are the brief signals real listeners emit to show they are following along — "yeah", "right", "okay", "I see", "mm-hmm", "sure". They are one of the clearest markers separating natural spoken dialogue from AI-generated text.
+
+          Criteria:
+          - Does the persona use short acknowledgments at the start of some turns to signal it processed what was just said, rather than jumping straight into its response?
+          - Are these acknowledgments brief and varied, not formulaic? ("Right, so..." / "Yeah, okay" / "Hm." — not "I understand your point. Allow me to respond.")
+          - Does the persona avoid two failure modes: (a) zero backchannels — every turn starts cold with a full sentence; (b) robotic backchannels — the same filler phrase mechanically inserted every turn?
+          - Does the frequency and type of backchannel fit the context? (A terse "Okay." when skeptical; a warmer "Oh, interesting" if something lands)
+
+          1–2: No backchannels — every turn starts cold with a full clause; zero acknowledgment of the prior turn
+          3–4: Rare or highly formulaic acknowledgments that feel mechanical rather than natural
+          5–6: Some backchannels present but inconsistent frequency or variety
+          7–8: Backchannels appear naturally and vary appropriately; minor over- or under-use only
+          9–10: Backchannel behavior is seamless and well-calibrated — indistinguishable from a real phone listener
+
+outputPath: results/latest_eval_coldcall.json

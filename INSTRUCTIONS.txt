@@ -1,0 +1,507 @@
+================================================================================
+  PERSONA PROMPTING TESTBED — USER GUIDE
+================================================================================
+
+A framework for testing different LLM prompting strategies to evaluate how well
+gpt-4o-mini can simulate a persona/character (e.g., a potential car buyer).
+Includes a real-time RAG system (Pinecone), persistent session memory, and
+structured chat logging.
+
+
+--------------------------------------------------------------------------------
+  QUICK START
+--------------------------------------------------------------------------------
+
+1. Install dependencies:
+       pip install -r requirements.txt
+
+2. Set up your .env file (copy from .env.example and fill in your keys):
+       OPENAI_API_KEY=...
+       PINECONE_API_KEY=...
+       PINECONE_INDEX_NAME=persona-rag
+       PINECONE_CLOUD=aws
+       PINECONE_REGION=us-east-1
+
+3. Upload a persona to Pinecone (one-time per persona):
+       python upload_persona.py personas/car_buyer.txt
+
+4. Start the chat interface:
+       python chat.py
+
+
+--------------------------------------------------------------------------------
+  FILE STRUCTURE
+--------------------------------------------------------------------------------
+
+  chat.py                  Main chat interface — run this to start testing
+  upload_persona.py        CLI tool to upload/manage personas in Pinecone
+  config.py                Central configuration (model, RAG settings, paths)
+  requirements.txt         Python dependencies
+
+  personas/                Persona definition files (.txt)
+    car_buyer.txt          Alex Chen — analytical first-time parent, budget SUV buyer
+    wealthy_enthusiast.txt Victor Hargrove — 60-year-old car expert, Porsche 911 Turbo S
+
+  prompting/               One file per prompting method
+    base.py                Abstract base class all methods inherit from
+    basic.py               Zero-shot (no RAG, no reasoning)
+    few_shot.py            RAG-injected few-shot demonstrations
+    chain_of_thought.py    Step-by-step reasoning before response
+    tree_of_thought.py     Branch generation + scoring + best-branch response
+    reflection.py          Draft → critique → refined response
+    registry.py            Method lookup table — add new methods here
+
+  rag/
+    pinecone_client.py     Pinecone connection and upsert/query wrapper
+    retriever.py           Embedding and semantic search logic
+
+  memory/
+    conversation.py        Session persistence and sliding-window history
+
+  sessions/                Active session state (JSON, auto-created)
+  logs/                    Exported chat logs (JSON, auto-created)
+
+
+--------------------------------------------------------------------------------
+  THE CHAT INTERFACE (chat.py)
+--------------------------------------------------------------------------------
+
+Run:  python chat.py
+
+On startup you will see a menu:
+  1. New conversation       Start a fresh session
+  2. Continue session       Resume a previous conversation
+  3. Compare methods        Run one message through all methods side-by-side
+  4. Exit
+
+For a new conversation, you will:
+  - Select a persona (by number or name)
+  - Select a prompting method
+  - Begin chatting as the salesperson; the model responds as the persona
+
+
+COMMANDS DURING CHAT
+--------------------
+Type any of these at the chat prompt:
+
+  /help              Show available commands
+  /quit  or  /exit   End the session and export a log to logs/
+  /history           Print the full conversation so far
+  /method <name>     Switch to a different prompting method mid-session
+                     Example: /method chain_of_thought
+  /compare           Pause and enter a message to run through ALL methods
+                     simultaneously — shows side-by-side responses
+  /info              Display current session ID, persona, method, message count
+  /debug             Toggle debug mode — shows token counts, RAG scores,
+                     number of API calls per response
+  /save              Manually save session state and export a log copy
+  /stats             Show per-prompt response times and session average,
+                     broken down by prompting method
+
+
+COMPARE MODE
+------------
+The most useful feature for research. Use it to send the same salesperson
+message to all 5 prompting methods at once and see the differences directly.
+
+Two ways to access it:
+  - From the main menu, select option 3
+  - During chat, type /compare (you will be prompted for a message)
+
+Each method's elapsed time is shown inline next to "done" and a timing summary
+table is printed after the responses, making it easy to compare latency
+alongside response quality.
+
+
+RESPONSE TIMING
+---------------
+Every prompt/response exchange is timed automatically (wall-clock, including
+streaming time). Use /stats at any point during a session to see a table of
+per-turn times and per-method averages. The same summary is printed
+automatically when the session ends.
+
+
+--------------------------------------------------------------------------------
+  PROMPTING METHODS
+--------------------------------------------------------------------------------
+
+Methods are selected at the start of each session or switched with /method.
+
+  basic
+  -----
+  Zero-shot prompting. The model receives only the role prompt (personality,
+  tone, goals, speaking style) with no examples and no structured reasoning.
+  Use this as your baseline. Does not use RAG.
+  API calls per response: 1
+
+  few_shot
+  --------
+  The role prompt plus up to 3 example Q&A pairs retrieved from Pinecone in
+  real time based on semantic similarity to the current message. The model
+  uses these examples to calibrate tone and response style.
+  API calls per response: 1
+
+  chain_of_thought
+  ----------------
+  The role prompt plus a set of explicit reasoning steps the model works
+  through before producing its response (what is the salesperson doing, how
+  does the persona react, what emotional state are they in, what tone to use).
+  The reasoning is internal — only the final response is output.
+  Also uses RAG examples for tone calibration.
+  API calls per response: 1
+
+  tree_of_thought
+  ---------------
+  A full negotiation-aware multi-step process, optimised to 2-3 API calls:
+    Step 1 — Analyze the negotiation state. On the first turn this reads the
+             full conversation history. On subsequent turns a short diff-update
+             prompt patches only the fields that changed (faster, shorter prompt).
+             Extracts: prices, trade-in figures, persona posture
+             (open/skeptical/firm/cooling/walking), prior commitments, active
+             leverage, and deal distance.
+    Step 2 — (skipped on trivial turns) Generate 3-4 distinct negotiation tactics
+             and score each in a single call, then return the winner. Tactics:
+             push_harder, soft_push, conditional_accept, backtrack,
+             walk_away_signal, walk_out, genuine_interest, accept.
+             Each branch specifies what the persona concedes and demands.
+             Scoring penalises premature walk-outs or sudden capitulations that
+             contradict prior commitments. 4 branches are generated at close/
+             very_close distance or when posture is cooling/walking; 3 otherwise.
+    Step 3 — Stream the final response using the winning branch as an explicit
+             negotiation frame. Output appears in real-time as it is generated.
+
+  Trivial turns (opening/exploring phase, far/moderate distance, no prior
+  commitments) skip Step 2 entirely and default to soft_push, reducing to
+  2 API calls. High-stakes turns (bargaining/closing, close distance, firm
+  or walking posture) always run the full 3-step path.
+
+  Use /debug to see the selected tactic, negotiation phase, deal distance,
+  persona posture, and API call count for each turn.
+  Supports the walk-out mechanic (see WALK-OUT MECHANIC below).
+  API calls per response: 2 (trivial turns) or 3 (high-stakes turns)
+
+  reflection
+  ----------
+  A three-pass process:
+    Step 1 — Generate an initial (draft) response
+    Step 2 — Critique the draft against the persona's traits
+             (tone, priorities, authenticity, what feels off-character)
+    Step 3 — Produce a refined response that addresses the critique
+  Use /debug to see the draft and critique alongside the final response.
+  API calls per response: 3
+
+
+--------------------------------------------------------------------------------
+  WALK-OUT MECHANIC
+--------------------------------------------------------------------------------
+
+Any persona can walk out of the negotiation if the salesperson says something
+sufficiently unsavory — repeated dishonesty, an insulting offer, an ADM that
+the dealer refuses to move, or ignoring a clear warning signal.
+
+HOW IT WORKS
+------------
+The walk-out is a two-stage process:
+
+  walk_away_signal  The persona issues a final warning. They are still present
+                    and willing to continue IF the dealer addresses the problem.
+                    Example: "I've told you the ADM doesn't work for me. If that
+                    line stays on the sheet I'll be heading out."
+
+  walk_out          The persona ends the conversation and leaves. This only
+                    triggers after a warning has been ignored, or after a single
+                    severe provocation (outright lie, egregiously low trade-in
+                    with no justification). The response is a composed, brief
+                    farewell — no anger, just finality.
+
+When a walk-out is detected, the chat loop ends immediately after displaying
+the persona's farewell. A red "Deal Failed" panel is shown, and the full
+conversation (including the farewell) is saved to the session log.
+
+DETECTION BY METHOD
+-------------------
+  tree_of_thought   Walk-out is detected directly from the selected tactic —
+                    no extra API call. The branch+select step penalises premature
+                    walk-outs; the tactic must be earned by the conversation.
+                    On trivial turns where branching is skipped, soft_push is
+                    used and walk_out cannot be selected.
+
+  All other methods After generating the response, a single lightweight
+                    classification call checks whether the persona has actually
+                    left. The classifier is calibrated to ignore threats and
+                    ultimatums — it fires only on a genuine goodbye.
+
+TESTING WALK-OUTS
+-----------------
+To trigger a walk-out intentionally, try escalating pressure tactics after
+the persona has already issued a warning:
+  - Insist an ADM is non-negotiable after Victor Hargrove has objected to it
+  - Continue pushing artificial urgency after Alex Chen has explicitly rejected it
+  - Offer a trade-in below the floor the persona already stated, with no justification
+  - Follow up a walk_away_signal with a response that ignores the stated concern
+
+
+--------------------------------------------------------------------------------
+  INCLUDED PERSONAS
+--------------------------------------------------------------------------------
+
+  Alex Chen (car_buyer.txt)
+  --------------------------
+  32-year-old software engineer and first-time parent. Budget: $25,000-$35,000.
+  Analytical, research-driven, skeptical of sales pressure. Looking for a midsize
+  family SUV. Will not sign without his wife seeing the car first. Trade-in: 2015
+  Honda Civic (~$12,000-$13,000 KBB). Walk-out triggers: artificial urgency,
+  bundled add-ons, trade-in below KBB floor with no justification.
+
+  Victor Hargrove (wealthy_enthusiast.txt)
+  -----------------------------------------
+  60-year-old retired private equity partner. Budget: $150,000-$250,000 (cash).
+  40+ years of enthusiast ownership across Porsche, Ferrari, Mercedes-Benz, and
+  others. Looking for a 911 Turbo S or GT3. Trade-in: 2021 Porsche 911 Carrera 4S
+  (~$88,000-$94,000 by his own comps). He knows more about the car than most
+  salespeople and will test them. Walk-out triggers: any ADM that won't move,
+  dealer-installed add-ons on the sticker, trade-in below market with no
+  justification, factual dishonesty about the vehicle.
+
+
+--------------------------------------------------------------------------------
+  PERSONA FILES
+--------------------------------------------------------------------------------
+
+Persona files live in personas/ and use a three-section format.
+
+
+SECTION 1: [PERSONA_INFO]
+-------------------------
+Structured key: value pairs. Used as a reference profile and as a fallback
+system prompt if no [ROLE_PROMPT] section exists.
+
+  name: Alex Chen
+  age: 32
+  budget: $25,000 to $35,000
+  ...
+
+
+SECTION 2: [ROLE_PROMPT]
+-------------------------
+A rich narrative character brief. This is the most important section — it is
+injected as the persistent system prompt at the start of every conversation
+and remains active for the entire session regardless of prompting method.
+
+Write this section to explicitly define:
+  - Personality traits and psychological profile
+  - Speaking style (how they phrase things, what they reference, how they ask
+    questions)
+  - Behaviors (what makes them skeptical, what genuinely interests them,
+    what they will not do)
+  - Conversation goals (what they are trying to accomplish in this interaction)
+  - Tone (measured, guarded, enthusiastic, firm, etc. and when each applies)
+
+The more specific and behavioral this section is, the more consistent and
+authentic the persona will be across all prompting methods.
+
+Lines beginning with # in the file are comments and are ignored by the parser.
+
+
+SECTION 3: [EXAMPLES]
+---------------------
+Real example Q&A pairs used by the RAG system. Each example is separated by
+a --- delimiter and contains a USER line and a PERSONA line.
+
+  ---
+  USER: What's your budget?
+  PERSONA: I'd like to stay in the $25,000 to $35,000 range...
+  ---
+
+These examples are embedded and stored in Pinecone. At each turn, the 3 most
+semantically similar examples to the current conversation context are retrieved
+and injected into the prompt (for methods that use RAG).
+
+Aim for 20-30 diverse examples covering different scenarios, tones, and
+situations the persona might encounter. The broader the coverage, the better
+the RAG retrieval will perform.
+
+
+--------------------------------------------------------------------------------
+  MANAGING PERSONAS IN PINECONE
+--------------------------------------------------------------------------------
+
+Upload a persona (creates Pinecone index if it doesn't exist):
+    python upload_persona.py personas/car_buyer.txt
+
+Re-upload after editing the persona file (clears old vectors first):
+    python upload_persona.py personas/car_buyer.txt --clear
+
+List all personas currently stored in Pinecone:
+    python upload_persona.py --list
+
+Each persona is stored in its own Pinecone namespace (derived from the name
+field), so multiple personas can coexist in the same index without interference.
+
+
+ADDING A NEW PERSONA
+--------------------
+1. Create a new .txt file in personas/ following the three-section format
+2. Write a thorough [ROLE_PROMPT] and at least 20 [EXAMPLES]
+3. Run: python upload_persona.py personas/your_new_persona.txt
+4. The persona will appear in the selection menu the next time you run chat.py
+
+
+--------------------------------------------------------------------------------
+  SESSION MEMORY AND LOGS
+--------------------------------------------------------------------------------
+
+Sessions are saved automatically after every message exchange to sessions/.
+Each session is a JSON file named by its session ID (e.g., a3f8bc12.json).
+
+When a session ends (/quit, /exit, or Ctrl+C), a copy is exported to logs/
+as an immutable record with a timestamp in the filename.
+
+You can manually trigger a save+export at any time with /save.
+
+Sessions can be resumed from the main menu (option 2). The full conversation
+history is reloaded and the chat continues from where it left off. The
+prompting method used in the original session is restored, though you can
+switch it with /method at any point.
+
+The sliding window for API context is set to the last 20 messages (configurable
+in config.py via MAX_HISTORY_MESSAGES). Older messages are retained in the
+session file for logging but are not sent to the API.
+
+Log files (in logs/) are standard JSON and can be opened in any text editor
+or parsed programmatically for analysis.
+
+
+--------------------------------------------------------------------------------
+  CONFIGURATION (config.py)
+--------------------------------------------------------------------------------
+
+Key settings you may want to adjust:
+
+  MODEL                   LLM to use (default: gpt-4o-mini)
+  EMBEDDING_MODEL         Embedding model (default: text-embedding-3-small)
+  RAG_TOP_K               Number of examples retrieved per turn (default: 3)
+  MAX_HISTORY_MESSAGES    Sliding window size for API context (default: 20)
+  PINECONE_INDEX_NAME     Pinecone index name (default: persona-rag)
+
+These can also be set via environment variables in .env.
+
+
+--------------------------------------------------------------------------------
+  ADDING A NEW PROMPTING METHOD
+--------------------------------------------------------------------------------
+
+1. Create a new file in prompting/ (e.g., prompting/my_method.py)
+
+2. Subclass BasePromptMethod:
+
+       from prompting.base import BasePromptMethod
+
+       class MyMethod(BasePromptMethod):
+           name = "my_method"
+           description = "One-line description shown in the selection menu."
+           uses_rag = True  # set False if your method does not use RAG
+
+3. Implement build_messages() for single-call methods:
+
+       def build_messages(self, persona_info, rag_examples, conversation_history, user_input):
+           system = self._build_system_core(persona_info)   # role prompt base
+           # append method-specific instructions to system...
+           messages = [{"role": "system", "content": system}]
+           messages.extend(conversation_history)
+           messages.append({"role": "user", "content": user_input})
+           return messages
+
+   For multi-call methods (like tree_of_thought or reflection), override
+   generate() directly instead and raise NotImplementedError in build_messages().
+
+4. Register in prompting/registry.py:
+
+       from prompting.my_method import MyMethod
+       METHODS = {
+           ...
+           "my_method": MyMethod(),
+       }
+
+The method will then appear in the selection menu and be included in /compare.
+
+KEY HELPER METHODS AVAILABLE IN BasePromptMethod:
+  self._build_system_core(persona_info)
+      Returns the role prompt if present, or a structured fallback.
+      Use this as the foundation of every system message.
+
+  self._format_persona_block(persona_info)
+      Returns the [PERSONA_INFO] fields as a bullet list.
+      Useful for analytical prompts (branching, scoring, critiquing).
+
+  self._format_examples_block(examples, persona_name)
+      Formats retrieved RAG examples into a labeled block for injection.
+
+  self.detect_walkout(response_text, persona_info)
+      Classifies whether a generated response represents an actual departure.
+      Returns True/False. Called automatically by chat.py for all non-ToT
+      methods. You can also call it directly inside a custom generate().
+
+  self.client
+      Lazy-loaded OpenAI client. Use self.client.chat.completions.create(...)
+
+
+generate() return value:
+  Returns a tuple: (response_text: str, metadata: dict)
+  The metadata dict is shown in /debug mode. Include anything useful:
+  API call count, token usage, intermediate outputs, scores, etc.
+
+  To signal a walk-out from a custom method, set "walked_out": True in
+  the metadata dict. chat.py will display the farewell and end the session.
+  If "walked_out" is absent, chat.py runs detect_walkout() automatically.
+
+
+--------------------------------------------------------------------------------
+  TIPS FOR EFFECTIVE TESTING
+--------------------------------------------------------------------------------
+
+- Start every test run with /compare on your opening salesperson line. This
+  gives you an immediate baseline comparison across all 5 methods.
+
+- Use /debug to see token counts and RAG retrieval scores. High RAG scores
+  mean the retrieved examples were semantically close to your input. Low
+  scores mean the query was outside the persona's example coverage — consider
+  adding more examples to the persona file for those scenarios.
+
+- tree_of_thought uses 2-3 API calls per response (down from 4); reflection
+  uses 3. Both are slower and more expensive than single-call methods, though
+  tree_of_thought now streams its final response so output begins appearing
+  immediately rather than waiting for the full generation to complete.
+  Use /compare sparingly to avoid burning tokens on every turn.
+
+- Use /stats at the end of a session (or mid-session) to review per-prompt
+  response times and per-method averages. This is useful for quantifying the
+  latency cost of multi-call methods like tree_of_thought and reflection
+  relative to single-call methods like basic and few_shot.
+
+- To isolate the contribution of the role prompt, compare basic vs. few_shot.
+  Both receive the same role prompt — the only difference is RAG examples.
+
+- To isolate the contribution of structured reasoning, compare few_shot vs.
+  chain_of_thought. Both receive the role prompt and RAG examples — the only
+  difference is the explicit reasoning steps.
+
+- To stress-test persona consistency, use high-pressure scenarios:
+    "This deal ends tonight."
+    "I can get you in this car right now — just say yes."
+    "What would it take to sign today?"
+  A well-calibrated persona should maintain its skepticism and behavioral
+  patterns regardless of the prompting method.
+
+- To test the walk-out mechanic, push past the persona's stated limits after
+  they have issued a warning. With Victor Hargrove, insist on an ADM after he
+  has explicitly refused it. With Alex Chen, keep applying urgency pressure
+  after he has already called it out. The persona should escalate to a composed
+  farewell rather than continuing to engage. Use /debug to watch the tactic
+  progress from walk_away_signal to walk_out in tree_of_thought mode.
+
+- Chat logs in logs/ are plain JSON. You can write a simple script to extract
+  all responses by method, score them, or compare side-by-side across sessions.
+
+
+================================================================================

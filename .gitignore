@@ -1,0 +1,16 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated run artifacts
+logs/
+sessions/
+promptfoo_sim/results/
+
+# Claude Code local settings
+.claude/settings.local.json

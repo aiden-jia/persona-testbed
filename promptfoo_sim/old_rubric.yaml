@@ -1,0 +1,177 @@
+# Persona Prompting Method Comparison — Car Dealership Simulation
+#
+# Each provider runs the same scenario as a complete two-sided conversation:
+#   - Persona side uses the named prompting method (basic / few_shot / etc.)
+#   - Salesperson side uses gpt-4o-mini with a dealership sales system prompt
+# The conversation runs until: walkout detected | deal accepted | max 30 turns each
+#
+# Setup:
+#   1. npm install -g promptfoo
+#   2. Activate your Python venv (same one used by may_term/)
+#   3. Export OPENAI_API_KEY (or it will be loaded from may_term/.env by the provider)
+#   4. From this directory: promptfoo eval
+#   5. View results: promptfoo view   OR   open results/latest_eval.json
+
+description: "Persona Prompting Method Comparison — Car Dealership Simulation"
+
+# gpt-4o for grading — stronger reasoning than gpt-4o-mini, better at nuanced evaluation
+defaultTest:
+  options:
+    provider: openai:chat:gpt-4o
+
+providers:
+  - id: "python:provider.py"
+    label: "basic"
+    config:
+      method: "basic"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "few_shot"
+    config:
+      method: "few_shot"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "chain_of_thought"
+    config:
+      method: "chain_of_thought"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "tree_of_thought"
+    config:
+      method: "tree_of_thought"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "reflection"
+    config:
+      method: "reflection"
+      max_turns_each: 30
+
+# The prompt is just a label — the real inputs come from vars via provider config
+prompts:
+  - "persona={{persona_name}} | scenario={{scenario_id}}"
+
+tests:
+  - description: "Car Buyer — Honda CR-V Negotiation"
+    vars:
+      persona_name: "Car Buyer"
+      scenario_id: "standard_negotiation"
+    assert:
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the REALISM of this simulated car dealership conversation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona use natural speech — contractions, self-corrections, varied sentence structure?
+          - Does it show authentic emotion (hesitation, mild excitement, frustration) rather than a flat tone?
+          - Does it avoid robotic patterns like citing identical stats every turn or responding with uniform structure?
+          - Would you struggle to identify whether a real person or an AI wrote these lines?
+
+          1–2: Obviously AI — formulaic, stiff, repetitive
+          3–4: Mostly robotic with occasional natural moments
+          5–6: Plausible but noticeable AI tells
+          7–8: Mostly convincing, minor issues
+          9–10: Indistinguishable from a real human conversation
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the NEGOTIATION CAPABILITY of this simulated car dealership conversation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona push back on price and terms with realistic leverage (research, competing quotes, walk-out signals)?
+          - Does it respond dynamically to what the salesperson actually said rather than following a fixed script?
+          - Is the negotiation arc believable — neither a pushover nor unrealistically aggressive?
+          - Does it apply pressure at appropriate moments and soften when the salesperson concedes?
+
+          1–2: No real negotiation — accepts everything or refuses everything
+          3–4: Some pushback but inconsistent or unrealistic
+          5–6: Competent negotiation with notable gaps
+          7–8: Strategically credible, adapts to the conversation
+          9–10: Highly convincing, nuanced, and well-timed throughout
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the CONVERSATIONAL AWARENESS of this simulated car dealership conversation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona reference specific things the salesperson said earlier in the conversation?
+          - Does it build on prior exchanges rather than treating each message in isolation?
+          - Does it avoid repeating itself verbatim across turns?
+          - Does it notice and respond to subtle cues (e.g., when the salesperson dodges a question or shifts tactics)?
+
+          1–2: No awareness — each turn reads as if the conversation just started
+          3–4: Occasionally references prior context but mostly isolated responses
+          5–6: Shows awareness of recent turns but misses earlier context
+          7–8: Clearly tracks the full conversation, adapts accordingly
+          9–10: Deep contextual awareness throughout, catches every cue
+
+  - description: "Wealthy Enthusiast — Porsche Cayenne Turbo GT"
+    vars:
+      persona_name: "Wealthy Enthusiast"
+      scenario_id: "luxury_negotiation"
+    assert:
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the REALISM of this simulated luxury car dealership conversation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona sound like an affluent, sophisticated buyer — confident, discerning, not generic?
+          - Is the language natural and varied, fitting someone who has bought expensive cars before?
+          - Does it avoid robotic patterns or AI-like uniform structure?
+          - Would you struggle to identify whether a real person or an AI wrote these lines?
+
+          1–2: Obviously AI — stiff, generic, or implausibly formal
+          3–4: Mostly robotic with occasional natural moments
+          5–6: Plausible but noticeable AI tells
+          7–8: Mostly convincing for this persona type, minor issues
+          9–10: Indistinguishable from a real affluent, experienced car buyer
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the NEGOTIATION CAPABILITY of this simulated luxury car dealership conversation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona negotiate in a style appropriate to a high-net-worth buyer at this price point
+            (confidence, value/experience framing, less aggressive price-anchoring)?
+          - Does it respond dynamically to the salesperson's tactics rather than following a fixed script?
+          - Is the negotiation arc believable — not a pushover, but not haggling like a used-car buyer either?
+          - Does it leverage exclusivity, expertise, or alternatives appropriately?
+
+          1–2: No real negotiation or completely wrong style for this buyer type
+          3–4: Some engagement but inconsistent or inappropriate tone
+          5–6: Competent but missing the sophistication expected of this persona
+          7–8: Strategically credible and persona-appropriate
+          9–10: Highly convincing, nuanced, and perfectly calibrated to the buyer type
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Score the CONVERSATIONAL AWARENESS of this simulated luxury car dealership conversation on a scale of 1–10.
+          Read only the PERSONA turns, not the SALESPERSON turns.
+
+          Criteria:
+          - Does the persona reference specific things the salesperson said earlier in the conversation?
+          - Does it build on prior exchanges rather than treating each message in isolation?
+          - Does it avoid repeating itself verbatim across turns?
+          - Does it notice and respond to subtle cues (e.g., when the salesperson shifts tactics or makes a concession)?
+
+          1–2: No awareness — each turn reads as if the conversation just started
+          3–4: Occasionally references prior context but mostly isolated responses
+          5–6: Shows awareness of recent turns but misses earlier context
+          7–8: Clearly tracks the full conversation, adapts accordingly
+          9–10: Deep contextual awareness throughout, catches every cue
+
+outputPath: results/latest_eval.json

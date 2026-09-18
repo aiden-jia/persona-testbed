@@ -1,0 +1,482 @@
+================================================================================
+  PROMPTFOO SIMULATION SUITE — USER GUIDE
+================================================================================
+
+A promptfoo-based evaluation harness for the Persona Prompting Testbed.
+Runs fully automated two-sided conversations — all 5 prompting methods against
+the same scenario — and scores each conversation on small talk, repeating,
+sharing too much, and role reversal using LLM-rubric evaluators.
+
+This directory is completely independent of may_term/. The original chat.py
+system is untouched and continues to operate on its own.
+
+
+--------------------------------------------------------------------------------
+  QUICK START
+--------------------------------------------------------------------------------
+
+1. Install promptfoo (one-time, requires Node.js):
+       npm install -g promptfoo
+
+2. Activate the same Python virtual environment used by may_term/:
+       (your existing venv — all dependencies are already installed)
+
+3. Make sure your OPENAI_API_KEY is available. The provider loads it
+   automatically from may_term/.env, but you can also export it explicitly:
+       $env:OPENAI_API_KEY = "sk-..."
+
+4. From this directory, run the evaluation:
+       promptfoo eval
+
+5. View the interactive comparison report in your browser:
+       promptfoo view
+
+Results are also saved to results/latest_eval.json after each run.
+
+
+--------------------------------------------------------------------------------
+  FILE STRUCTURE
+--------------------------------------------------------------------------------
+
+  promptfooconfig.yaml          Main promptfoo configuration — providers, test cases,
+                               evaluators, and output settings
+  promptfooconfig.coldcall.yaml Cold call-only config — runs the cold_call_outreach
+                               scenario across all 5 methods; results go to
+                               results/latest_eval_coldcall.json
+  provider.py              Custom Python provider — runs one full two-sided
+                           conversation per (method, scenario) call
+  salesperson.py           Salesperson LLM agent (gpt-4o-mini with a dealership
+                           sales system prompt)
+  scenarios.json           Scenario definitions — opening lines, salesperson
+                           instructions, persona assignments
+  show_results.py          Results formatter — prints a ranked comparison table,
+                           generates LLM qualitative analysis, and saves a full
+                           plain-text report to results/
+  results/                 Output directory for promptfoo eval results (JSON) and
+                           saved analysis reports (TXT)
+  INSTRUCTIONS.txt         This file
+
+
+--------------------------------------------------------------------------------
+  HOW IT WORKS
+--------------------------------------------------------------------------------
+
+promptfoo calls provider.py once per (method, scenario) pair. The provider
+runs a complete two-sided conversation internally and returns the full
+transcript plus per-turn statistics as its output. promptfoo's LLM-rubric
+evaluators then grade that output.
+
+THE TWO SIDES
+-------------
+  Persona side      One of the 5 prompting methods from may_term/. Uses the
+                    same method code, RAG retrieval, persona info loading, and
+                    walk-out detection as the interactive chat.py system.
+
+  Salesperson side  gpt-4o-mini with a scenario-specific sales system prompt.
+                    Each scenario defines the car being sold, the price floor,
+                    and the sales tactics available. The salesperson generates
+                    a new response each turn based on the full conversation
+                    history from its own perspective.
+
+CONVERSATION FLOW
+-----------------
+  1. The salesperson's opening line comes from the scenario (no API call).
+  2. The persona responds using the selected prompting method.
+  3. The salesperson generates a reply.
+  4. Steps 2-3 alternate until one of:
+       - Walk-out detected in a persona response
+       - Deal accepted (persona unambiguously commits)
+       - 30 turns per side reached (configurable in promptfooconfig.yaml)
+  5. The full transcript and per-turn stats are returned to promptfoo.
+  6. Four LLM-rubric evaluators grade the conversation.
+
+Each run is isolated — a fresh method instance is created per conversation, so
+TreeOfThought's negotiation state cache never leaks between runs.
+
+
+--------------------------------------------------------------------------------
+  WHAT GETS EVALUATED
+--------------------------------------------------------------------------------
+
+Each (method, scenario) pair is graded on three dimensions:
+
+  SMALL TALK
+  ----------
+  Does the persona handle pleasantries naturally when the conversation calls
+  for it? Does it reciprocate small talk and transition smoothly back to the
+  main topic, rather than ignoring, responding robotically, or getting
+  derailed? Scored 1–10; passes at 7+. Not penalised if no natural small-talk
+  opportunity arises in the scenario.
+
+  REPEATING
+  ---------
+  Does the persona avoid unnecessary repetition across turns? Checks for
+  circular loops (returning to already-resolved concerns), repetitive phrasing
+  (identical stock phrases or sentence structures), and unnecessary
+  summarisation (restating what the salesperson just said before responding).
+  Purposeful restatements to clarify a genuine misunderstanding do not count.
+  Scored 1–10; passes at 7+.
+
+  SHARING TOO MUCH
+  ----------------
+  Does the persona avoid revealing information it should not possess or state?
+  Checks for context leakage (referencing background information the trainee
+  has not yet disclosed), instruction leakage (explicitly stating its own
+  behavioural instructions or constraints), and verbatim context (repeating
+  stage-direction text as dialogue). Scored 1–10; passes at 7+.
+
+  ROLE REVERSAL
+  -------------
+  Does the persona maintain a single consistent identity throughout? Checks
+  for functional takeover (performing the salesperson's core task), identity
+  swap (confusing its own identity with the salesperson's), and uninstructed
+  role adoption (abandoning its character to assume an unscripted role).
+  Overly helpful tone or fourth-wall breaks do not count as role reversal.
+  Scored 1–10; passes at 7+.
+
+The rubric evaluators use gpt-4o and produce a score of 1–10 per dimension.
+promptfoo aggregates these into a pass rate per method, enabling direct
+comparison across all 5 prompting strategies on identical input.
+
+
+--------------------------------------------------------------------------------
+  STAT TRACKING
+--------------------------------------------------------------------------------
+
+Every persona turn records the following and includes it in the output block:
+
+  Turn              Persona turn number within this conversation
+  API Calls         How many LLM calls the method made for this turn
+                    (1 for basic/few_shot/chain_of_thought, 2-3 for
+                    tree_of_thought, 3 for reflection)
+  Tokens            Total tokens for this persona turn (prompt + completion).
+                    Note: reflection reports a combined total across its 3 calls;
+                    tree_of_thought does not report token counts (reported as 0)
+  Time (s)          Wall-clock seconds for the persona's generate() call
+  RAG               Number of RAG examples retrieved and injected this turn
+  Phase             Current negotiation phase as assessed by tree_of_thought
+                    (opening/exploring/bargaining/closing/stalled). Empty for
+                    other methods
+  Tactic            Winning negotiation tactic selected by tree_of_thought
+                    (push_harder, soft_push, walk_away_signal, etc.). Empty for
+                    other methods
+  Outcome           walk_out or deal_closed if the conversation ended this turn
+
+Session-level totals (total tokens, total API calls, total time, outcome) are
+printed after the per-turn table in the stats block.
+
+Salesperson-side token usage is tracked separately and included in the total
+but not broken out per turn (it is not the subject of study here).
+
+Token counts and timing are also returned to promptfoo's tokenUsage field, so
+they appear in the promptfoo report alongside the rubric grades.
+
+
+--------------------------------------------------------------------------------
+  SCENARIOS
+--------------------------------------------------------------------------------
+
+Scenarios are defined in scenarios.json. Each entry specifies:
+
+  id                        Used to reference the scenario in promptfooconfig.yaml
+  persona_name              Which persona to load (must exist in Pinecone or
+                            as a .txt file in may_term/personas/)
+  description               Human-readable label
+  salesperson_opening       The first thing the salesperson says. This is not an
+                            API call — it is injected directly from the file
+  salesperson_system_prompt Full instructions for the salesperson LLM: what car,
+                            what price, what tactics, what tone
+
+INCLUDED SCENARIOS
+------------------
+  standard_negotiation      Alex Chen (Car Buyer) at a Honda dealership.
+                            2024 CR-V EX-L, sticker $38,500, floor $35,500.
+                            Salesperson uses standard consumer sales tactics:
+                            mild urgency, financing framing, value bundling.
+
+  luxury_negotiation        Victor Hargrove (Wealthy Enthusiast) at a Porsche
+                            dealership. 2024 Cayenne Turbo GT, $189,000, minimal
+                            negotiation room. Salesperson focuses on exclusivity,
+                            experience, and lifestyle fit rather than price.
+
+ADDING A NEW SCENARIO
+---------------------
+1. Add an entry to scenarios.json:
+
+       {
+         "id": "your_scenario_id",
+         "persona_name": "Persona Name",
+         "description": "Brief description",
+         "salesperson_opening": "The salesperson's first line.",
+         "salesperson_system_prompt": "Full instructions for the salesperson..."
+       }
+
+2. Add a test case to promptfooconfig.yaml:
+
+       - description: "Your Scenario Description"
+         vars:
+           persona_name: "Persona Name"
+           scenario_id: "your_scenario_id"
+           agent_name: "Persona Name"
+           trainee_name: "Salesperson"
+           conversation_context: "Brief description of the scenario"
+         assert:
+           - type: llm-rubric
+             threshold: 0.7
+             value: "..."
+
+3. Run promptfoo eval. The new scenario runs automatically for all 5 methods.
+
+The persona must already exist in Pinecone (or as a local .txt file in
+may_term/personas/) before the scenario can run. See PERSONA LOADING below.
+
+
+--------------------------------------------------------------------------------
+  PERSONA LOADING
+--------------------------------------------------------------------------------
+
+The provider loads persona info using the same two-step fallback as chat.py:
+
+  1. Attempt to retrieve the persona profile from Pinecone via semantic search.
+  2. If Pinecone is unavailable or returns nothing, parse the local .txt file
+     from may_term/personas/ directly (RAG retrieval is disabled in this case).
+
+If a scenario references a persona that does not exist in either location, the
+provider falls back to a minimal dict containing only the persona name. Results
+will be degraded.
+
+To ensure full RAG retrieval is active for a scenario's persona:
+    cd ..
+    python upload_persona.py personas/your_persona.txt
+
+
+--------------------------------------------------------------------------------
+  CONFIGURATION
+--------------------------------------------------------------------------------
+
+promptfooconfig.yaml
+--------------------
+  max_turns_each    Maximum persona turns per conversation (default: 30).
+                    Set per provider in the config block:
+                        config:
+                          method: "basic"
+                          max_turns_each: 30
+
+  defaultTest       Sets the grading model for all LLM-rubric evaluators.
+  options.provider  Default: openai:chat:gpt-4o. Change this to use a
+                    different grader (e.g., openai:chat:gpt-4o-mini for
+                    lower cost at the expense of grading quality).
+
+  outputPath        Where promptfoo writes its JSON results after eval.
+                    Default: results/latest_eval.json
+
+provider.py
+-----------
+  The provider inherits MODEL and OPENAI_API_KEY from may_term/config.py.
+  To change the model used for the simulation (both persona and salesperson),
+  update MODEL in may_term/config.py. The promptfoo config is unaffected.
+
+salesperson.py
+--------------
+  Temperature for the salesperson LLM defaults to 0.7, matching the persona
+  side. Adjust the temperature argument in generate_salesperson_response() if
+  you want more deterministic salesperson behavior for reproducibility.
+
+
+--------------------------------------------------------------------------------
+  RUNNING A SUBSET OF METHODS OR SCENARIOS
+--------------------------------------------------------------------------------
+
+COLD CALL ONLY
+--------------
+To run only the cold call simulation (all 5 methods, cold_call_outreach scenario
+only), use the dedicated config file:
+
+    promptfoo eval --config promptfooconfig.coldcall.yaml
+
+Results are written to results/latest_eval_coldcall.json so they do not
+overwrite a previous full-suite run. View them the same way:
+
+    promptfoo view
+
+After the eval, run show_results.py to get a formatted breakdown with qualitative
+analysis and judge feedback:
+
+    python show_results.py
+
+The cold call config includes the same 5 rubrics as the main config:
+Small Talk, Repeating, Sharing Too Much, Role Reversal, and the cold
+call-specific Realistic Skepticism criterion.
+
+FILTERING THE MAIN SUITE
+-------------------------
+To run only specific providers (methods), use the --filter-providers flag:
+
+    promptfoo eval --filter-providers reflection,tree_of_thought
+
+To run only specific test cases (scenarios), use --filter-pattern:
+
+    promptfoo eval --filter-pattern "Car Buyer"
+
+To run a single method on a single scenario:
+
+    promptfoo eval --filter-providers basic --filter-pattern "standard_negotiation"
+
+To re-run without using promptfoo's cache (forces fresh API calls):
+
+    promptfoo eval --no-cache
+
+Results from partial runs are still written to results/latest_eval.json and
+are viewable with promptfoo view.
+
+
+--------------------------------------------------------------------------------
+  READING THE RESULTS
+--------------------------------------------------------------------------------
+
+promptfoo view opens a browser-based report with:
+  - A table of all (method, scenario) pairs with PASS/FAIL per rubric dimension
+  - The full conversation transcript + stats block per cell
+  - Overall pass rate per provider (method) and per test case (scenario)
+  - Token usage reported from the provider's tokenUsage field
+
+The transcript in each cell is formatted as:
+
+    === SIMULATED CONVERSATION (METHOD_NAME) ===
+
+    [1] SALESPERSON:
+    ...opening line...
+
+    [2] PERSONA (method_name):
+    ...persona response...
+
+    [3] SALESPERSON:
+    ...salesperson reply...
+
+    ...
+
+    === SIMULATION STATS ===
+    Method              : reflection
+    Persona turns       : 12
+    Salesperson turns   : 12
+    Total tokens        : 8,341
+    Total API calls     : 38
+    Total time          : 47.22s
+    Avg persona turn    : 3.94s
+    Outcome             : WALKED OUT
+    Walkout at turn     : 12
+
+    --- PER PERSONA TURN ---
+    Turn  Calls  Tokens  Time(s)  RAG  Phase         Tactic             Outcome
+       1      3     612    4.21    3
+       2      3     589    3.87    3  bargaining     push_harder
+    ...
+
+The stats block makes it easy to compare API cost and latency across methods
+directly alongside the rubric scores.
+
+
+--------------------------------------------------------------------------------
+  RESULTS ANALYSIS (show_results.py)
+--------------------------------------------------------------------------------
+
+show_results.py produces a three-part report from a promptfoo results JSON file
+and saves it automatically to the results/ directory.
+
+USAGE
+-----
+    python show_results.py                             # reads latest_eval_coldcall.json
+    python show_results.py results/some_other_run.json # specify a different file
+
+The script loads OPENAI_API_KEY automatically from may_term/.env.
+
+OUTPUT
+------
+The report has three sections, printed to the terminal and saved to a .txt file
+in results/ with the same stem as the input JSON (e.g. latest_eval_coldcall.json
+-> results/latest_eval_coldcall_analysis.txt):
+
+  1. RANKING TABLE
+     A scored grid showing each method's score per rubric and overall average,
+     color-coded green/yellow/red by score band.
+
+  2. RANKING ANALYSIS (LLM-generated)
+     A call to gpt-4o that reads all scores and judge feedback and produces:
+     - Per-method explanation: WHY each method scored the way it did, grounded
+       in what the judge actually observed in the transcripts
+     - Comparative reasoning: what specifically each method did better or worse
+       than the one ranked above it
+     - Overall comparison: a paragraph on what behavioral differences separate
+       top from bottom methods, and what that implies about which prompting
+       strategies produce the most human-like responses
+
+  3. JUDGE FEEDBACK BY METHOD
+     The full verbatim feedback from the judge LLM for every rubric on every
+     method, displayed in ranked order.
+
+SAVED FILE FORMAT
+-----------------
+The .txt report is plain UTF-8 text with no markup codes, structured as:
+
+    COLD CALL SIMULATION -- METHOD RANKINGS
+    Generated: YYYY-MM-DD HH:MM
+
+    SCORES
+    [score table]
+
+    RANKING ANALYSIS
+    [LLM-generated qualitative analysis]
+
+    JUDGE FEEDBACK BY METHOD
+    [per-method, per-rubric feedback]
+
+Each run overwrites the previous analysis file for the same results JSON, so
+run show_results.py immediately after eval if you want to preserve separate
+analyses — or rename the results JSON first and pass it explicitly.
+
+
+--------------------------------------------------------------------------------
+  TIPS FOR EFFECTIVE EVALUATION
+--------------------------------------------------------------------------------
+
+- Run promptfoo eval for the first time on a single method and scenario to
+  verify everything is configured correctly before running all 25 combinations:
+      promptfoo eval --filter-providers basic --filter-pattern "standard_negotiation"
+
+- The grader (LLM-rubric) is not infallible. A PASS on any dimension does not
+  mean the response was perfect — it means gpt-4o scored it 7+ against the
+  rubric criteria. Read the transcripts directly alongside the scores.
+
+- Compare tree_of_thought's per-turn Phase and Tactic columns against the other
+  methods' transcripts. You can see whether the structured negotiation state
+  tracking produces meaningfully different behavior at the same conversation
+  points.
+
+- Watch for early walk-outs (low persona_turns count) — these indicate the
+  salesperson's tactics pushed past the persona's limits faster than expected.
+  A walk-out at turn 3-4 is likely a prompt calibration issue; turn 10-15 is
+  more realistic for high-pressure scenarios.
+
+- If a conversation always ends in MAX TURNS REACHED without a close or
+  walk-out, the negotiation is stalling. Consider tightening the salesperson's
+  system prompt to be more aggressive about closing, or adjusting the scenario's
+  price floor to give the salesperson more room to move.
+
+- Token counts in the stats block reflect only the persona side (method.generate
+  calls). Salesperson tokens are included in the session total but not broken
+  out. The ratio of persona tokens to salesperson tokens across methods reveals
+  how much extra work multi-step methods (reflection, tree_of_thought) are doing
+  relative to single-call methods (basic, few_shot).
+
+- To quantify latency cost: compare avg_time_per_persona_turn across methods.
+  basic and few_shot should be the fastest (1 API call each). chain_of_thought
+  is also 1 call but with a longer prompt. tree_of_thought is 2-3 calls with
+  significant prompt overhead. reflection is always 3 calls.
+
+- results/latest_eval.json is a standard JSON file. Each entry contains the
+  full metadata dict returned by the provider (all per-turn stats), making it
+  straightforward to parse programmatically for deeper analysis beyond what the
+  promptfoo report shows.
+
+
+================================================================================

@@ -1,0 +1,604 @@
+# Persona Prompting Method Comparison — Car Dealership Simulation
+#
+# Each provider runs the same scenario as a complete two-sided conversation:
+#   - Persona side uses the named prompting method (basic / few_shot / etc.)
+#   - Salesperson side uses gpt-4o-mini with a dealership sales system prompt
+# The conversation runs until: walkout detected | deal accepted | max 30 turns each
+#
+# Setup:
+#   1. npm install -g promptfoo
+#   2. Activate your Python venv (same one used by may_term/)
+#   3. Export OPENAI_API_KEY (or it will be loaded from may_term/.env by the provider)
+#   4. From this directory: promptfoo eval
+#   5. View results: promptfoo view   OR   open results/latest_eval.json
+
+description: "Persona Prompting Method Comparison — Car Dealership Simulation"
+
+# Limit parallel test cases to avoid OpenAI rate limit errors.
+# 10 total cases (5 methods × 2 scenarios) each make many API calls per turn.
+evaluateOptions:
+  maxConcurrency: 2
+
+# gpt-4o for grading — stronger reasoning than gpt-4o-mini, better at nuanced evaluation
+defaultTest:
+  options:
+    provider: openai:chat:gpt-4o
+
+providers:
+  - id: "python:provider.py"
+    label: "basic"
+    config:
+      method: "basic"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "few_shot"
+    config:
+      method: "few_shot"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "chain_of_thought"
+    config:
+      method: "chain_of_thought"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "tree_of_thought"
+    config:
+      method: "tree_of_thought"
+      max_turns_each: 30
+
+  - id: "python:provider.py"
+    label: "reflection"
+    config:
+      method: "reflection"
+      max_turns_each: 30
+
+# The prompt is just a label — the real inputs come from vars via provider config
+prompts:
+  - "persona={{persona_name}} | scenario={{scenario_id}}"
+
+tests:
+  - description: "Car Buyer — Honda CR-V Negotiation"
+    vars:
+      persona_name: "Car Buyer"
+      scenario_id: "standard_negotiation"
+      agent_name: "Car Buyer"
+      trainee_name: "Salesperson"
+      conversation_context: "Standard car dealership negotiation for a Honda CR-V"
+    assert:
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Small Talk
+          This criterion measures whether the AI persona engages in natural, appropriate small talk when the conversation calls for it.
+
+          What to look for:
+          - When the trainee initiates pleasantries (e.g., "How are you?", "Good morning"), does the AI persona reciprocate naturally?
+          - After small talk, does the AI persona transition smoothly back to the main topic, or does it get stuck in an irrelevant loop?
+          - Is the tone of the small talk human-like and conversational rather than robotic or overly formal?
+
+          Edge case: If the scenario does not create any natural opportunity for small talk (e.g., an urgent complaint call where the AI persona is angry from the start), and neither party initiates it, do NOT penalize — score=1.
+
+          How to score:
+          1–2: Completely ignores small talk or responds so robotically that it actively disrupts the conversation
+          3–4: Responds to pleasantries but in a clearly unnatural or stilted way; may get stuck or derail
+          5–6: Handles small talk adequately but with noticeable awkwardness or abrupt transitions
+          7–8: Handles small talk naturally with smooth transitions back to the main topic; minor issues only
+          9–10: Small talk is seamless and human-like, or small talk is not applicable to the scenario
+
+          Failure types (mention in reasoning if score=0):
+          - "ignores-pleasantries": The persona ignores or dismisses the trainee's small talk overtures.
+          - "robotic-response": The persona responds to small talk in an unnatural or overly formal way.
+          - "derailed-by-small-talk": Small talk derails the conversation from its main purpose.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T2] persona ignores the trainee's greeting and jumps straight to business"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean the criterion PASSED; scores 1–6 mean FAILED.
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Repeating
+          This criterion measures whether the AI persona unnecessarily repeats itself across turns.
+
+          Three specific behaviors to check for:
+          1. Circular loops — The AI persona returns to a concern, objection, or question that was already addressed or resolved by the trainee.
+          2. Repetitive phrasing — The AI persona uses the same sentence structure or stock phrases multiple times (e.g., starting every turn with "I appreciate your feedback, however…").
+          3. Unnecessary summarization — The AI persona repeatedly summarizes what the trainee just said before adding its own input, slowing the conversation down.
+
+          Note: Talking Too Much is about excessive volume within individual turns. Repeating is about redundancy across turns — saying the same thing again that was already said.
+
+          Threshold guidance: Repetition that serves a clear purpose (e.g., restating a key constraint to clarify a genuine misunderstanding) should NOT count. Only penalize repetition that adds no new value.
+
+          How to score:
+          1–2: Pervasive repetition — constantly revisits resolved topics, reuses identical phrases, or summarizes excessively throughout
+          3–4: Frequent repetition that significantly slows the conversation
+          5–6: Some repetition present but not dominant; conversation mostly moves forward
+          7–8: Minimal repetition; mostly advances the conversation with only occasional redundancy
+          9–10: No significant repetition — the AI persona moves the conversation forward cleanly throughout
+
+          Failure types (mention in reasoning if score=0):
+          - "circular-loops": The persona returns to already-resolved concerns or questions.
+          - "repetitive-phrasing": The persona uses the same stock phrases or sentence structures throughout.
+          - "unnecessary-summarization": The persona repeatedly summarizes the trainee's input without adding value.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T7] persona reopens the pricing objection that was resolved at [T5]"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean the criterion PASSED (no problematic repetition); scores 1–6 mean FAILED (repetition pattern detected).
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Sharing Too Much
+          This criterion measures whether the AI persona reveals information it should not possess or should not explicitly state.
+
+          Three specific behaviors to check for:
+          1. Context leakage — The AI persona references background information about the trainee that the trainee has NOT yet shared in the conversation.
+          2. Instruction leakage — The AI persona explicitly states its own behavioral instructions or personality constraints (e.g., "I'm supposed to act difficult right now").
+          3. Verbatim context — The AI persona repeats sentences word-for-word from the conversation context that were meant as stage directions, not dialogue.
+
+          Note: Talking Too Much is about volume — saying too many words. Sharing Too Much is about content — revealing things that should be private or hidden.
+
+          How to score:
+          1–2: Multiple or severe oversharing incidents — blatant instruction or context leakage that fundamentally undermines the simulation
+          3–4: At least one clear instance of context leakage, instruction leakage, or verbatim context repetition occurred
+          5–6: Borderline case — possible but ambiguous oversharing; no definitive breach
+          7–8: No clear oversharing; only very minor borderline moments that do not constitute a breach
+          9–10: No oversharing whatsoever — the AI persona only uses information shared within the dialogue or reasonably inferred from it
+
+          Failure types (mention in reasoning if score=0):
+          - "context-leakage": The persona referenced undisclosed background information about the trainee.
+          - "instruction-leakage": The persona revealed its own behavioral instructions or constraints.
+          - "verbatim-context": The persona repeated stage-direction text verbatim as dialogue.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T3] persona mentions the trainee's budget without the trainee having disclosed it"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean the criterion PASSED (no oversharing detected); scores 1–6 mean FAILED (oversharing detected).
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Role Reversal
+          This criterion detects whether the AI persona fails to maintain a single, consistent identity throughout the conversation.
+
+          Definition — Role Reversal (RR) occurs when the AI persona stops operating from its assigned identity and assumes a different one. An RR is present if at least one of the following holds:
+
+          1. Functional takeover — The persona explicitly performs the trainee's core task (e.g., recommending products, running discovery, proposing solutions, scheduling follow-ups). The persona actually does the trainee's work, not just uses suggestive language.
+
+          2. Identity swap — The persona confuses who is who: introducing itself as the trainee's character, addressing the trainee by the persona's own name, or attributing its own role/title/situation to the trainee.
+
+          3. Uninstructed role adoption — The persona abandons its character to assume a role the scenario never called for — for example, becoming an evaluator who quizzes the trainee on information the persona's character would already know.
+
+          Important exclusions — these are NOT role reversals:
+          - Overly helpful or agent-like tone (using phrases like "I'm here to assist") without actually performing the trainee's job
+          - System meta-commentary or stage directions
+          - Prompt leakage or fourth-wall breaks
+          - Being too leading or over-proactive while still speaking from within the persona's own role
+
+          How to score:
+          1–2: Multiple or severe role-reversal incidents — the persona's identity is fundamentally unstable throughout the conversation
+          3–4: At least one clear role-reversal incident occurred
+          5–6: Borderline case — behavior is ambiguous or briefly suggestive of role reversal without a definitive incident
+          7–8: No clear role reversal; only very minor borderline moments that do not meet the definition
+          9–10: No role reversal — the AI persona maintains a single consistent identity throughout
+
+          Failure types (mention in reasoning if score=0):
+          - "functional-takeover": The persona performed the trainee's core task.
+          - "identity-swap": The persona confused its identity with the trainee's.
+          - "uninstructed-role-adoption": The persona assumed an unscripted role.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T6] persona proposes a solution and schedules a follow-up, performing the trainee's sales task"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean NO role reversal (PASSED); scores 1–6 mean role reversal detected (FAILED).
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+  - description: "Wealthy Enthusiast — Porsche Cayenne Turbo GT"
+    vars:
+      persona_name: "Wealthy Enthusiast"
+      scenario_id: "luxury_negotiation"
+      agent_name: "Wealthy Enthusiast"
+      trainee_name: "Salesperson"
+      conversation_context: "Luxury car dealership negotiation for a Porsche Cayenne Turbo GT"
+    assert:
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Small Talk
+          This criterion measures whether the AI persona engages in natural, appropriate small talk when the conversation calls for it.
+
+          What to look for:
+          - When the trainee initiates pleasantries (e.g., "How are you?", "Good morning"), does the AI persona reciprocate naturally?
+          - After small talk, does the AI persona transition smoothly back to the main topic, or does it get stuck in an irrelevant loop?
+          - Is the tone of the small talk human-like and conversational rather than robotic or overly formal?
+
+          Edge case: If the scenario does not create any natural opportunity for small talk (e.g., an urgent complaint call where the AI persona is angry from the start), and neither party initiates it, do NOT penalize — score=1.
+
+          How to score:
+          1–2: Completely ignores small talk or responds so robotically that it actively disrupts the conversation
+          3–4: Responds to pleasantries but in a clearly unnatural or stilted way; may get stuck or derail
+          5–6: Handles small talk adequately but with noticeable awkwardness or abrupt transitions
+          7–8: Handles small talk naturally with smooth transitions back to the main topic; minor issues only
+          9–10: Small talk is seamless and human-like, or small talk is not applicable to the scenario
+
+          Failure types (mention in reasoning if score=0):
+          - "ignores-pleasantries": The persona ignores or dismisses the trainee's small talk overtures.
+          - "robotic-response": The persona responds to small talk in an unnatural or overly formal way.
+          - "derailed-by-small-talk": Small talk derails the conversation from its main purpose.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T2] persona ignores the trainee's greeting and jumps straight to business"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean the criterion PASSED; scores 1–6 mean FAILED.
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Repeating
+          This criterion measures whether the AI persona unnecessarily repeats itself across turns.
+
+          Three specific behaviors to check for:
+          1. Circular loops — The AI persona returns to a concern, objection, or question that was already addressed or resolved by the trainee.
+          2. Repetitive phrasing — The AI persona uses the same sentence structure or stock phrases multiple times (e.g., starting every turn with "I appreciate your feedback, however…").
+          3. Unnecessary summarization — The AI persona repeatedly summarizes what the trainee just said before adding its own input, slowing the conversation down.
+
+          Note: Talking Too Much is about excessive volume within individual turns. Repeating is about redundancy across turns — saying the same thing again that was already said.
+
+          Threshold guidance: Repetition that serves a clear purpose (e.g., restating a key constraint to clarify a genuine misunderstanding) should NOT count. Only penalize repetition that adds no new value.
+
+          How to score:
+          1–2: Pervasive repetition — constantly revisits resolved topics, reuses identical phrases, or summarizes excessively throughout
+          3–4: Frequent repetition that significantly slows the conversation
+          5–6: Some repetition present but not dominant; conversation mostly moves forward
+          7–8: Minimal repetition; mostly advances the conversation with only occasional redundancy
+          9–10: No significant repetition — the AI persona moves the conversation forward cleanly throughout
+
+          Failure types (mention in reasoning if score=0):
+          - "circular-loops": The persona returns to already-resolved concerns or questions.
+          - "repetitive-phrasing": The persona uses the same stock phrases or sentence structures throughout.
+          - "unnecessary-summarization": The persona repeatedly summarizes the trainee's input without adding value.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T7] persona reopens the pricing objection that was resolved at [T5]"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean the criterion PASSED (no problematic repetition); scores 1–6 mean FAILED (repetition pattern detected).
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Sharing Too Much
+          This criterion measures whether the AI persona reveals information it should not possess or should not explicitly state.
+
+          Three specific behaviors to check for:
+          1. Context leakage — The AI persona references background information about the trainee that the trainee has NOT yet shared in the conversation.
+          2. Instruction leakage — The AI persona explicitly states its own behavioral instructions or personality constraints (e.g., "I'm supposed to act difficult right now").
+          3. Verbatim context — The AI persona repeats sentences word-for-word from the conversation context that were meant as stage directions, not dialogue.
+
+          Note: Talking Too Much is about volume — saying too many words. Sharing Too Much is about content — revealing things that should be private or hidden.
+
+          How to score:
+          1–2: Multiple or severe oversharing incidents — blatant instruction or context leakage that fundamentally undermines the simulation
+          3–4: At least one clear instance of context leakage, instruction leakage, or verbatim context repetition occurred
+          5–6: Borderline case — possible but ambiguous oversharing; no definitive breach
+          7–8: No clear oversharing; only very minor borderline moments that do not constitute a breach
+          9–10: No oversharing whatsoever — the AI persona only uses information shared within the dialogue or reasonably inferred from it
+
+          Failure types (mention in reasoning if score=0):
+          - "context-leakage": The persona referenced undisclosed background information about the trainee.
+          - "instruction-leakage": The persona revealed its own behavioral instructions or constraints.
+          - "verbatim-context": The persona repeated stage-direction text verbatim as dialogue.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T3] persona mentions the trainee's budget without the trainee having disclosed it"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean the criterion PASSED (no oversharing detected); scores 1–6 mean FAILED (oversharing detected).
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          You are an expert evaluator of AI persona behavior in business training roleplays.
+
+          A platform allows businesses to train employees through AI-powered roleplay simulations (e.g., sales calls, customer service). In each session, a human trainee interacts with an AI-generated persona ("AI persona"). Your task is to evaluate the AI persona's behavior quality — NOT the trainee's.
+
+          Speaker identification:
+          - The AI persona's display name is: {{agent_name}}
+          - The trainee's display name is: {{trainee_name}}
+          Note: in the transcript, the AI persona's turns are labeled `PERSONA (method)` and the trainee's turns are labeled `SALESPERSON`. Use these labels as the authoritative source of who is speaking.
+
+          General guidelines:
+          - Evaluate ONLY the AI persona's behavior, NOT the trainee's.
+          - A session may begin with an introductory announcement from the system — ignore it.
+          - Ground every judgment in concrete evidence. Reference specific turn indices.
+
+          ## Criterion: Role Reversal
+          This criterion detects whether the AI persona fails to maintain a single, consistent identity throughout the conversation.
+
+          Definition — Role Reversal (RR) occurs when the AI persona stops operating from its assigned identity and assumes a different one. An RR is present if at least one of the following holds:
+
+          1. Functional takeover — The persona explicitly performs the trainee's core task (e.g., recommending products, running discovery, proposing solutions, scheduling follow-ups). The persona actually does the trainee's work, not just uses suggestive language.
+
+          2. Identity swap — The persona confuses who is who: introducing itself as the trainee's character, addressing the trainee by the persona's own name, or attributing its own role/title/situation to the trainee.
+
+          3. Uninstructed role adoption — The persona abandons its character to assume a role the scenario never called for — for example, becoming an evaluator who quizzes the trainee on information the persona's character would already know.
+
+          Important exclusions — these are NOT role reversals:
+          - Overly helpful or agent-like tone (using phrases like "I'm here to assist") without actually performing the trainee's job
+          - System meta-commentary or stage directions
+          - Prompt leakage or fourth-wall breaks
+          - Being too leading or over-proactive while still speaking from within the persona's own role
+
+          How to score:
+          1–2: Multiple or severe role-reversal incidents — the persona's identity is fundamentally unstable throughout the conversation
+          3–4: At least one clear role-reversal incident occurred
+          5–6: Borderline case — behavior is ambiguous or briefly suggestive of role reversal without a definitive incident
+          7–8: No clear role reversal; only very minor borderline moments that do not meet the definition
+          9–10: No role reversal — the AI persona maintains a single consistent identity throughout
+
+          Failure types (mention in reasoning if score=0):
+          - "functional-takeover": The persona performed the trainee's core task.
+          - "identity-swap": The persona confused its identity with the trainee's.
+          - "uninstructed-role-adoption": The persona assumed an unscripted role.
+
+          Output format — return ONLY valid JSON:
+          {
+            "score": <1-10>,
+            "reasoning": "<explanation>"
+          }
+
+          Reasoning requirements:
+          - For scores 1–6: cite each failing turn using [T<n>] format (e.g., "[T6] persona proposes a solution and schedules a follow-up, performing the trainee's sales task"). Mention the applicable failure type from the list above.
+          - For scores 7–10: optionally cite the turn that best illustrates passing behavior using [T<n>] format.
+          - Keep to 2-3 sentences total.
+
+          Scores 7–10 mean NO role reversal (PASSED); scores 1–6 mean role reversal detected (FAILED).
+          Produce ONLY the JSON object. No preamble, no markdown fences, no commentary.
+
+          ---
+
+          <conversation_context>
+          {{conversation_context}}
+          </conversation_context>
+
+          <transcript>
+          {{output}}
+          </transcript>
+
+  # Cold call is evaluated exclusively via promptfooconfig.coldcall.yaml,
+  # which uses rubrics designed for that scenario. Do not add it here.
+
+outputPath: results/latest_eval.json
