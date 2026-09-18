@@ -1,4 +1,4 @@
-# chatpersonas
+# persona-testbed
 
 A testbed for evaluating how well an LLM can stay in character as a simulated persona, and which prompting strategy does it best.
 
